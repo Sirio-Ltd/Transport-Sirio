@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="si">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Transport pickup point registration</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Noto+Sans+Sinhala:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root {
+    --ink: #14305A; --sign: #F2B705; --page: #EEF1F4; --card: #FFFFFF;
+    --muted: #5A6776; --line: #C9D1DA; --go: #1F7A45; --warn: #9A5B00; --stop: #B3261E; --r: 10px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--page); color: var(--ink);
+    font: 17px/1.55 "Atkinson Hyperlegible", "Noto Sans Sinhala", "Iskoola Pota", "Segoe UI", Roboto, Arial, sans-serif;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  html[lang=si] body { line-height: 1.7; }
+  .wrap { max-width: 560px; margin: 0 auto; padding: 0 16px 48px; }
+
+  .sign { background: var(--sign); padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 22px; border-bottom: 6px solid var(--ink); }
+  .sign-top { max-width: 560px; margin: 0 auto 12px; display: flex; justify-content: flex-end; }
+  .lang { display: inline-flex; border: 2px solid var(--ink); border-radius: 999px; overflow: hidden; background: #fff; }
+  .lang button { width: auto; min-height: 40px; padding: 6px 16px; border: 0; border-radius: 0; background: #fff; color: var(--ink); font-weight: 700; }
+  .lang button[aria-pressed=true] { background: var(--ink); color: #fff; }
+  .sign-inner { max-width: 560px; margin: 0 auto; display: flex; gap: 14px; align-items: center; }
+  .stop-badge { flex: 0 0 56px; height: 56px; border-radius: 50%; background: var(--ink); color: var(--sign); display: grid; place-items: center; }
+  .sign h1 { margin: 0; font-size: 1.4rem; line-height: 1.25; }
+  .sign p { margin: 2px 0 0; font-size: .95rem; }
+
+  .purpose { background: var(--card); margin: 18px 0 8px; padding: 16px; border-left: 6px solid var(--sign); border-radius: 0 var(--r) var(--r) 0; }
+  .purpose h2 { margin: 0 0 6px; font-size: 1.1rem; }
+  .purpose p { margin: 0 0 8px; }
+  .purpose p:last-child { margin: 0; color: var(--muted); font-size: .95rem; }
+  .purpose strong { background: #FCE9A6; padding: 0 3px; }
+
+  .route { position: relative; margin-top: 20px; }
+  .route::before { content: ""; position: absolute; left: 17px; top: 18px; bottom: 18px; width: 4px; background: var(--line); }
+  .step { position: relative; padding-left: 52px; margin-bottom: 22px; }
+  .step .dot { position: absolute; left: 0; top: 0; width: 38px; height: 38px; border-radius: 50%; background: var(--card); border: 4px solid var(--line); color: var(--muted); display: grid; place-items: center; font-weight: 700; }
+  .step.active .dot { border-color: var(--ink); color: var(--ink); }
+  .step.done .dot { background: var(--go); border-color: var(--go); color: #fff; }
+  .step.locked { opacity: .45; pointer-events: none; }
+  .step h3 { margin: 4px 0 10px; font-size: 1.15rem; line-height: 1.35; }
+  .panel { background: var(--card); border-radius: var(--r); padding: 16px; }
+
+  label { display: block; font-weight: 700; margin: 0 0 4px; }
+  .hint { color: var(--muted); font-size: .9rem; margin: -2px 0 6px; }
+  .field { margin-bottom: 16px; }
+  .field:last-child { margin-bottom: 0; }
+  input[type=text], textarea { width: 100%; font: inherit; color: var(--ink); padding: 12px; border: 2px solid var(--line); border-radius: 8px; background: #fff; }
+  textarea { min-height: 84px; resize: vertical; }
+  input:focus, textarea:focus { outline: none; border-color: var(--ink); }
+  .err-msg { color: var(--stop); font-size: .9rem; margin-top: 4px; display: none; }
+  .invalid .err-msg { display: block; }
+  .invalid input, .invalid textarea { border-color: var(--stop); }
+
+  button { font: inherit; font-weight: 700; cursor: pointer; min-height: 52px; padding: 12px 18px; border-radius: 8px; border: 2px solid var(--ink); width: 100%; }
+  button:focus-visible, input[type=checkbox]:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+  .btn-main { background: var(--ink); color: #fff; }
+  .btn-alt { background: #fff; color: var(--ink); }
+  .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  button[disabled] { opacity: .5; cursor: not-allowed; }
+
+  .note { padding: 12px; border-radius: 8px; margin-top: 12px; font-size: .95rem; }
+  .note.info { background: #E6EDF6; }
+  .note.good { background: #E3F2E8; color: var(--go); }
+  .note.warn { background: #FFF1D6; color: var(--warn); }
+  .note.bad  { background: #FBE4E2; color: var(--stop); }
+  .hidden { display: none !important; }
+
+  .meter { margin: 14px 0 6px; }
+  .meter-bar { height: 10px; background: var(--page); border-radius: 5px; overflow: hidden; }
+  .meter-fill { height: 100%; width: 0; background: var(--muted); transition: width .4s, background .4s; }
+  .meter-text { display: flex; justify-content: space-between; gap: 8px; font-size: .95rem; margin-top: 6px; }
+
+  #map { height: 240px; border-radius: 8px; margin-top: 12px; border: 2px solid var(--line); }
+  .pcode { font-size: 1.35rem; font-weight: 700; letter-spacing: .06em; background: var(--page); border: 2px dashed var(--ink); border-radius: 8px; padding: 8px 12px; display: inline-block; }
+  .check { display: flex; gap: 12px; align-items: flex-start; font-weight: 400; }
+  .check input { width: 24px; height: 24px; flex: 0 0 24px; margin-top: 4px; accent-color: var(--ink); }
+
+  .done-card { background: var(--card); border-radius: var(--r); padding: 22px 18px; margin-top: 20px; border-top: 6px solid var(--go); }
+  .done-card h2 { margin: 0 0 8px; }
+  .done-card dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 14px 0; }
+  .done-card dt { color: var(--muted); }
+  .done-card dd { margin: 0; font-weight: 700; word-break: break-word; }
+
+  @media (prefers-reduced-motion: reduce) { .meter-fill { transition: none; } }
+</style>
+</head>
+<body>
+
+<header class="sign">
+  <div class="sign-top">
+    <div class="lang" role="group" aria-label="Language / භාෂාව">
+      <button type="button" data-lang="si" lang="si">සිංහල</button>
+      <button type="button" data-lang="en" lang="en">English</button>
+    </div>
+  </div>
+  <div class="sign-inner">
+    <div class="stop-badge" aria-hidden="true">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><path d="M4 16c0 .88.39 1.67 1 2.22V20a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1h8v1a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1.78c.61-.55 1-1.34 1-2.22V6c0-3.5-3.58-4-8-4s-8 .5-8 4v10zm3.5 1a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm9 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM18 11H6V6h12v5z"/></svg>
+    </div>
+    <div>
+      <h1 data-i18n="title"></h1>
+      <p data-i18n="subtitle"></p>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section class="purpose" id="purpose">
+    <h2 data-i18n="whyTitle"></h2>
+    <p data-i18n="why1"></p>
+    <p data-i18n="why2"></p>
+    <p data-i18n="why3"></p>
+  </section>
+
+  <div id="formArea" class="route">
+
+    <section class="step active" id="step1">
+      <div class="dot">1</div>
+      <h3 data-i18n="s1Title"></h3>
+      <div class="panel">
+        <div class="field" id="f-name">
+          <label for="fullName" data-i18n="nameLabel"></label>
+          <input type="text" id="fullName" autocomplete="name" maxlength="120">
+          <div class="err-msg" data-i18n="nameErr"></div>
+        </div>
+        <div class="field" id="f-epf">
+          <label for="epf" data-i18n="epfLabel"></label>
+          <input type="text" id="epf" inputmode="numeric" autocomplete="off" maxlength="30">
+          <div class="err-msg" data-i18n="epfErr"></div>
+        </div>
+        <div class="field" id="f-module">
+          <label for="module" data-i18n="modLabel"></label>
+          <p class="hint" data-i18n="modHint"></p>
+          <input type="text" id="module" maxlength="80">
+          <div class="err-msg" data-i18n="modErr"></div>
+        </div>
+        <button class="btn-main" id="toStep2" data-i18n="continue"></button>
+      </div>
+    </section>
+
+    <section class="step locked" id="step2">
+      <div class="dot">2</div>
+      <h3 data-i18n="s2Title"></h3>
+      <div class="panel">
+        <div class="btn-row">
+          <button class="btn-main" id="atSpotYes" data-i18n="yes"></button>
+          <button class="btn-alt" id="atSpotNo" data-i18n="no"></button>
+        </div>
+        <div class="note info hidden" id="notThereMsg" data-i18n="notThere"></div>
+      </div>
+    </section>
+
+    <section class="step locked" id="step3">
+      <div class="dot">3</div>
+      <h3 data-i18n="s3Title"></h3>
+      <div class="panel">
+        <p style="margin-top:0" data-i18n="s3Text"></p>
+        <button class="btn-main" id="captureBtn"></button>
+
+        <div id="meterBox" class="meter hidden" aria-live="polite">
+          <div class="meter-bar"><div class="meter-fill" id="meterFill"></div></div>
+          <div class="meter-text"><span id="meterLabel"></span><span id="meterAcc"></span></div>
+        </div>
+        <div id="locMsg" class="note hidden" aria-live="polite"></div>
+        <div class="btn-row hidden" id="lowAccBtns" style="margin-top:10px">
+          <button class="btn-main" id="retryBtn" data-i18n="retry"></button>
+          <button class="btn-alt" id="useAnywayBtn" data-i18n="useAnyway"></button>
+        </div>
+
+        <div id="map" class="hidden" role="img" aria-label="Map"></div>
+
+        <div id="confirmBox" class="hidden" style="margin-top:16px">
+          <div class="field">
+            <label data-i18n="pcLabel"></label>
+            <p class="hint" data-i18n="pcHint"></p>
+            <div class="pcode" id="pcode"></div>
+          </div>
+          <div class="field" id="f-address">
+            <label for="address" data-i18n="addrLabel"></label>
+            <p class="hint" data-i18n="addrHint"></p>
+            <textarea id="address" maxlength="300"></textarea>
+            <div class="err-msg" data-i18n="addrErr"></div>
+          </div>
+          <div class="field" id="f-confirm">
+            <label class="check"><input type="checkbox" id="confirm"><span data-i18n="confirm"></span></label>
+            <div class="err-msg" data-i18n="confirmErr"></div>
+          </div>
+          <button class="btn-main" id="submitBtn"></button>
+          <div id="submitMsg" class="note hidden" aria-live="polite"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <section class="done-card hidden" id="doneCard" aria-live="polite">
+    <h2 data-i18n="doneTitle"></h2>
+    <p id="doneText"></p>
+    <dl>
+      <dt data-i18n="dName"></dt><dd id="dName"></dd>
+      <dt data-i18n="dEpf"></dt><dd id="dEpf"></dd>
+      <dt data-i18n="dModule"></dt><dd id="dModule"></dd>
+      <dt data-i18n="dCode"></dt><dd id="dCode"></dd>
+      <dt data-i18n="dAddr"></dt><dd id="dAddr"></dd>
+    </dl>
+    <p style="color:var(--muted);margin-bottom:0" data-i18n="doneFoot"></p>
+  </section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+/* ====== SETTINGS: paste your Apps Script Web app URL here ====== */
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbygsCT593ylQkdZFYmGT0wpxT-89DwBJs1VPcLhqEk9O_rXYQAzebsJC0EUHNF7ic4-BA/exec';
+
+const GOOD_ACC = 30;     // metres: accepted straight away
+const MAX_ACC = 100;     // metres: above this, the worker must try again
+const WATCH_MS = 20000;  // how long to listen to GPS for the best reading
+
+/* ====== TEXT: Sinhala and English ====== */
+const T = {
+  si: {
+    title:'Staff transport: pickup & drop point',
+    subtitle: 'ආයතනයේ ප්‍රවාහන සේවාව සඳහා ලියාපදිංචිය',
+    whyTitle: 'අපි මෙම තොරතුරු රැස් කරන්නේ ඇයි?',
+    why1: 'ඔබව රැකියාවට රැගෙන ඒමට සහ නැවත නිවසට ගෙන යාමට අපි <strong>ආයතනයේ ප්‍රවාහන සේවාවක්</strong> සැලසුම් කරමින් සිටිමු. බස් මාර්ග සැලසුම් කිරීමට, ඔබව නංවා ගැනීමට සහ බස්සවීමට ඔබ කැමති නිවැරදි ස්ථානය අපට දැනගත යුතුයි.',
+    why2: '<strong>ඔබ එම ස්ථානයේ සිටගෙන සිටින විට මෙම පෝරමය පුරවන්න</strong>: ඔබේ නිවස පිහිටි ස්ථානය. ඔබේ දුරකථනය එම ස්ථානය සටහන් කර ගනී.',
+    why3: 'ඔබේ ස්ථානය භාවිත කරන්නේ ප්‍රවාහන මාර්ග සැලසුම් කිරීමට පමණි.',
+    s1Title: 'ඔබේ විස්තර',
+    nameLabel: 'නම', nameErr: 'ඔබේ නම ඇතුළත් කරන්න.',
+    epfLabel: 'EPF අංකය', epfErr: 'ඔබේ EPF අංකය ඇතුළත් කරන්න.',
+    modLabel: 'වැඩ කරන මොඩියුලය / අංශය', modHint: 'උදා: Sewing Module 23, Cutting, Finishing, Stores',
+    modErr: 'ඔබ වැඩ කරන මොඩියුලය හෝ අංශය ඇතුළත් කරන්න.',
+    continue: 'ඉදිරියට',
+    s2Title: 'ඔබ දැන් සිටින්නේ ඔබේ නිවසේද?',
+    yes: 'ඔව්, මම එහි සිටිමි', no: 'නැහැ, දැන් නොවේ',
+    notThere: 'කමක් නැහැ. තවම කිසිවක් යවා නැත. <strong>ඔබේ නැංවීමේ ස්ථානයේ සිටින විට මෙම සබැඳියම නැවත විවෘත කරන්න.</strong> ඔබේ විස්තර මෙම දුරකථනයේ සුරැකී පවතිනු ඇත.',
+    s3Title: 'ස්ථානය සටහන් කර තහවුරු කරන්න',
+    s3Text: 'හැකි නම් එළිමහනේ හෝ පාර අසල සිටින්න. විවෘත අහස යට GPS වඩාත් නිවැරදියි.',
+    capture: 'මගේ ස්ථානය සටහන් කරන්න', recording: 'සටහන් කරමින්…', captureAgain: 'නැවත සටහන් කරන්න',
+    finding: 'ඔබේ ස්ථානය සොයමින්… දුරකථනය නොසොල්වා තබන්න',
+    accLabel: 'නිරවද්‍යතාව: {n} m',
+    recorded: 'ස්ථානය සටහන් විය',
+    goodMsg: 'හොඳ නිරවද්‍යතාවක් ({n} m). පහත සිතියමේ ලකුණ පරීක්ෂා කරන්න.',
+    lowLabel: 'නිරවද්‍යතාව අඩුයි',
+    lowMsg: 'නිරවද්‍යතාව {n} m නිසා ලකුණ මඳක් වැරදි විය හැක. වඩා හොඳ ප්‍රතිඵලයක් සඳහා එළියට හෝ පාර අසලට ගොස් <strong>නැවත උත්සාහ කරන්න</strong> ඔබන්න.',
+    badLabel: 'නිරවද්‍යතාව ප්‍රමාණවත් නැත',
+    badMsg: 'නිරවද්‍යතාව {n} m. එය ප්‍රවාහන සැලසුම් සඳහා ඉතා දුරයි. Location (GPS) සක්‍රිය බව තහවුරු කර, විවෘත අහස යටට ගොස් <strong>නැවත සටහන් කරන්න</strong> ඔබන්න.',
+    retry: 'නැවත උත්සාහ කරන්න', useAnyway: 'මෙම ස්ථානය භාවිත කරන්න',
+    anywayMsg: '{n} m නිරවද්‍යතාව සහිත ස්ථානය භාවිත කෙරේ. රියදුරුට ඔබව සොයාගත හැකි වන පරිදි පහතින් පැහැදිලි සලකුණක් (landmark) එක් කරන්න.',
+    permDenied: '<strong>ස්ථාන අවසරය අවහිර කර ඇත.</strong> වෙබ් ලිපිනය අසල ඇති අගුළු සලකුණ ඔබා <em>Location</em> සඳහා අවසර දී, නැවත “මගේ ස්ථානය සටහන් කරන්න” ඔබන්න.',
+    unavailable: '<strong>ස්ථානය ලබාගත නොහැක.</strong> දුරකථන සැකසුම් තුළ Location (GPS) සක්‍රිය කර, එළියට ගොස් නැවත උත්සාහ කරන්න.',
+    notFound: 'ඔබේ ස්ථානය සොයාගත නොහැකි විය. Location (GPS) සක්‍රිය කර, එළියට ගොස් නැවත උත්සාහ කරන්න.',
+    unsupported: 'මෙම දුරකථනයට හෝ බ්‍රව්සරයට මෙහිදී ස්ථානය ලබාදිය නොහැක. සබැඳිය Chrome තුළ විවෘත කර නැවත උත්සාහ කරන්න.',
+    pcLabel: 'ස්ථාන කේතය (Plus Code)',
+    pcHint: 'Google Maps තුළ මෙම කේතය ටයිප් කළ විට මෙම ස්ථානයටම යා හැක.',
+    addrLabel: 'මෙම ස්ථානයේ ලිපිනය හෝ ළඟ ඇති සලකුණක් (landmark)',
+    addrHint: 'ස්වයංක්‍රීයව පිරවේ. කරුණාකර එය නිවැරදි කර ඔබේ නිවසේ අංකය, පටුමග හෝ සලකුණක් එක් කරන්න (උදා: “අංක 45, පන්සල පාර, වෑහැර හන්දියේ බස් නැවතුම අසල”).',
+    addrLooking: 'ලිපිනය සොයමින්…', addrPh: 'ලිපිනය හෝ ළඟ ඇති සලකුණක් ටයිප් කරන්න',
+    addrErr: 'රියදුරුට මෙම ස්ථානය සොයාගත හැකි වන පරිදි ලිපිනයක් හෝ සලකුණක් එක් කරන්න.',
+    confirm: 'ආයතනයේ ප්‍රවාහන සේවාව මා නංවා ගැනීමට සහ බස්සවීමට මා කැමති ස්ථානය මෙය බව මම තහවුරු කරමි.',
+    confirmErr: 'තහවුරු කිරීමට කොටුව ලකුණු කරන්න.',
+    submit: 'මගේ නැංවීමේ ස්ථානය ලියාපදිංචි කරන්න', submitting: 'ලියාපදිංචි කරමින්…',
+    notConnected: 'සැකසුම අසම්පූර්ණයි: පෝරමය තවම ෂීට් එකට සම්බන්ධ කර නැත.',
+    saveFail: 'දැන් සුරැකිය නොහැක. විනාඩියකින් නැවත උත්සාහ කරන්න.',
+    netFail: 'ලියාපදිංචි නොවීය: ඔබේ අන්තර්ජාල සම්බන්ධතාව පරීක්ෂා කර නැවත බොත්තම ඔබන්න.',
+    doneTitle: 'නැංවීමේ ස්ථානය ලියාපදිංචි විය',
+    doneText: 'ස්තුතියි. ඔබේ නැංවීමේ සහ බැස්සවීමේ ස්ථානය ප්‍රවාහන සැලසුම් සඳහා සුරැකිණි.',
+    doneUpdated: 'ඔබේ නැංවීමේ සහ බැස්සවීමේ ස්ථානය යාවත්කාලීන විය. පැරණි එක ඉවත් කෙරිණි.',
+    dName: 'නම', dEpf: 'EPF අංකය', dModule: 'මොඩියුලය', dCode: 'ස්ථාන කේතය', dAddr: 'ස්ථානය',
+    doneFoot: 'වැරදීමක් වුණාද, නැත්නම් වෙනත් ස්ථානයක් අවශ්‍යද? නිවැරදි ස්ථානයේ සිට මෙම සබැඳිය නැවත විවෘත කර නැවත ලියාපදිංචි වන්න. ඔබේ නවතම ඇතුළත් කිරීම පැරණි එක වෙනුවට යෙදේ.'
+  },
+  en: {
+    title: 'Staff transport: pickup & drop point',
+    subtitle: 'Registration for company transport',
+    whyTitle: 'Why we are collecting this',
+    why1: 'We are planning <strong>company transport</strong> to pick you up for work and drop you back home. To plan the bus routes, we need to know the exact place where you want to be picked up and dropped off.',
+    why2: '<strong>Fill in this form while you are standing at that place</strong>: your home gate. Your phone will record the spot.',
+    why3: 'Your location is used only for planning transport routes.',
+    s1Title: 'Your details',
+    nameLabel: 'Name', nameErr: 'Enter your name.',
+    epfLabel: 'EPF number', epfErr: 'Enter your EPF number.',
+    modLabel: 'Working module / section', modHint: 'e.g. Sewing Module 23, Cutting, Finishing, Stores',
+    modErr: 'Enter your working module or section.',
+    continue: 'Continue',
+    s2Title: 'Are you at your home now?',
+    yes: 'Yes, I\'m there', no: 'No, not now',
+    notThere: 'No problem. Nothing has been sent yet. <strong>Open this same link again when you are standing at your pickup point.</strong> Your details will still be filled in on this phone.',
+    s3Title: 'Record the location and confirm',
+    s3Text: 'Stand outside or near the road if you can. GPS is most accurate under open sky.',
+    capture: 'Record my location', recording: 'Recording…', captureAgain: 'Record again',
+    finding: 'Finding your location… keep the phone still',
+    accLabel: 'Accuracy: {n} m',
+    recorded: 'Location recorded',
+    goodMsg: 'Good accuracy ({n} m). Check the pin on the map below.',
+    lowLabel: 'Accuracy is low',
+    lowMsg: 'Accuracy is {n} m, so the pin may be a little off. For a better result, step outside or near the road and tap <strong>Try again</strong>.',
+    badLabel: 'Accuracy too low',
+    badMsg: 'Accuracy is {n} m, which is too far off for transport planning. Make sure Location (GPS) is on, step outside under open sky, and tap <strong>Record again</strong>.',
+    retry: 'Try again', useAnyway: 'Use this location',
+    anywayMsg: 'Using the location with {n} m accuracy. Please add a clear landmark below so the driver can find you.',
+    permDenied: '<strong>Location permission is blocked.</strong> Tap the lock icon next to the web address, allow <em>Location</em>, then tap “Record my location” again.',
+    unavailable: '<strong>Location not available.</strong> Turn on Location (GPS) in your phone settings, step outside, and try again.',
+    notFound: 'Could not find your location. Turn on Location (GPS), step outside, and try again.',
+    unsupported: 'This phone or browser cannot share location here. Open the link in Chrome and try again.',
+    pcLabel: 'Location code (Plus Code)',
+    pcHint: 'Type this code into Google Maps to go straight to this spot.',
+    addrLabel: 'Address or nearby landmark of this point',
+    addrHint: 'Filled in automatically. Please correct it and add your house number, lane or a landmark (e.g. “No. 45, Temple Road, near the Wehera junction bus stop”).',
+    addrLooking: 'Looking up the address…', addrPh: 'Type the address or a nearby landmark',
+    addrErr: 'Add an address or landmark so the driver can find this point.',
+    confirm: 'I confirm this is the place where I want the company transport to pick me up and drop me off.',
+    confirmErr: 'Tick the box to confirm.',
+    submit: 'Register my pickup point', submitting: 'Registering…',
+    notConnected: 'Setup incomplete: the form is not connected to the sheet yet.',
+    saveFail: 'Could not save right now. Please try again in a minute.',
+    netFail: 'Not registered: check your internet connection and tap the button again.',
+    doneTitle: 'Pickup point registered',
+    doneText: 'Thank you. Your pickup and drop point has been saved for transport planning.',
+    doneUpdated: 'Your pickup and drop point has been updated. The old one was replaced.',
+    dName: 'Name', dEpf: 'EPF no.', dModule: 'Module', dCode: 'Location code', dAddr: 'Point',
+    doneFoot: 'Made a mistake or want a different point? Open this link again at the correct place and register again. Your latest entry replaces the old one.'
+  }
+};
+
+const $ = id => document.getElementById(id);
+let lang = 'si';
+try { const l = localStorage.getItem('tp_lang'); if (l === 'en' || l === 'si') lang = l; } catch (_) {}
+
+function t(k, n) {
+  const s = (T[lang] && T[lang][k]) || T.en[k] || k;
+  return n == null ? s : s.replace('{n}', n);
+}
+
+/* Screen state, so switching language re-draws every message */
+const ui = { capture: 'capture', submit: 'submit', meter: null, meterN: null, loc: null, submitMsg: null, doneText: 'doneText', addrLooking: false };
+
+function render() {
+  document.documentElement.lang = lang;
+  document.querySelectorAll('[data-i18n]').forEach(el => { el.innerHTML = t(el.dataset.i18n); });
+  $('captureBtn').textContent = t(ui.capture);
+  $('submitBtn').textContent = t(ui.submit);
+  $('meterLabel').textContent = ui.meter ? t(ui.meter) : '';
+  $('meterAcc').textContent = ui.meterN == null ? '' : t('accLabel', ui.meterN);
+  const lm = $('locMsg');
+  if (ui.loc) { lm.className = 'note ' + ui.loc.kind; lm.innerHTML = t(ui.loc.key, ui.loc.n); }
+  else lm.className = 'note hidden';
+  const sm = $('submitMsg');
+  if (ui.submitMsg) { sm.className = 'note bad'; sm.textContent = t(ui.submitMsg); }
+  else sm.className = 'note hidden';
+  $('doneText').textContent = t(ui.doneText);
+  $('address').placeholder = t(ui.addrLooking ? 'addrLooking' : 'addrPh');
+  document.querySelectorAll('.lang button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.lang === lang)));
+}
+document.querySelectorAll('.lang button').forEach(b => b.addEventListener('click', () => {
+  lang = b.dataset.lang;
+  try { localStorage.setItem('tp_lang', lang); } catch (_) {}
+  render();
+}));
+
+/* Plus Code (Open Location Code), 10 digits ≈ 14 m × 14 m */
+function plusCode(lat, lng) {
+  const A = '23456789CFGHJMPQRVWX';
+  lat = Math.min(90, Math.max(-90, Number(lat)));
+  lng = ((Number(lng) + 180) % 360 + 360) % 360 - 180;
+  let la = Math.min(1439999, Math.floor((lat + 90) * 8000));
+  let lo = Math.min(2879999, Math.floor((lng + 180) * 8000));
+  let s = '';
+  for (let i = 0; i < 5; i++) {
+    s = A[la % 20] + A[lo % 20] + s;
+    la = Math.floor(la / 20); lo = Math.floor(lo / 20);
+  }
+  return s.slice(0, 8) + '+' + s.slice(8);
+}
+
+let best = null, watchId = null, watchTimer = null, map = null, marker = null, circle = null;
+
+/* Remember details on this phone so a worker who says "not now" can come back */
+function saveDraft() {
+  try { localStorage.setItem('tp_draft', JSON.stringify({ n: $('fullName').value, e: $('epf').value, m: $('module').value })); } catch (_) {}
+}
+function loadDraft() {
+  try {
+    const d = JSON.parse(localStorage.getItem('tp_draft') || 'null');
+    if (d) { $('fullName').value = d.n || ''; $('epf').value = d.e || ''; $('module').value = d.m || ''; }
+  } catch (_) {}
+}
+loadDraft();
+['fullName', 'epf', 'module'].forEach(id => $(id).addEventListener('input', saveDraft));
+
+function setStep(n) {
+  [1, 2, 3].forEach(i => {
+    const s = $('step' + i);
+    s.classList.toggle('active', i === n);
+    s.classList.toggle('done', i < n);
+    s.classList.toggle('locked', i > n);
+  });
+}
+function mark(fieldId, ok) { $(fieldId).classList.toggle('invalid', !ok); return ok; }
+
+$('toStep2').onclick = () => {
+  const ok = [
+    mark('f-name', $('fullName').value.trim().length >= 3),
+    mark('f-epf', $('epf').value.trim().length >= 1),
+    mark('f-module', $('module').value.trim().length >= 1)
+  ].every(Boolean);
+  if (!ok) return;
+  saveDraft();
+  setStep(2);
+  $('step2').scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+
+$('atSpotNo').onclick = () => $('notThereMsg').classList.remove('hidden');
+$('atSpotYes').onclick = () => {
+  $('notThereMsg').classList.add('hidden');
+  setStep(3);
+  $('step3').scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+
+function setLoc(kind, key, n) { ui.loc = kind ? { kind, key, n } : null; render(); }
+
+function updateMeter(acc) {
+  const pct = Math.max(5, Math.min(100, 100 - (Math.log10(Math.max(acc, 5)) - Math.log10(5)) / (Math.log10(200) - Math.log10(5)) * 95));
+  const fill = $('meterFill');
+  fill.style.width = pct + '%';
+  fill.style.background = acc <= GOOD_ACC ? 'var(--go)' : acc <= MAX_ACC ? 'var(--sign)' : 'var(--stop)';
+  ui.meterN = Math.round(acc);
+  render();
+}
+
+function stopWatch() {
+  if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+  clearTimeout(watchTimer);
+  watchId = null;
+}
+
+function startCapture() {
+  $('lowAccBtns').classList.add('hidden');
+  $('confirmBox').classList.add('hidden');
+  setLoc(null);
+
+  if (!window.isSecureContext || !('geolocation' in navigator)) { setLoc('bad', 'unsupported'); return; }
+
+  best = null;
+  $('captureBtn').disabled = true;
+  ui.capture = 'recording';
+  ui.meter = 'finding'; ui.meterN = null;
+  $('meterBox').classList.remove('hidden');
+  $('meterFill').style.width = '0';
+  render();
+  const started = Date.now();
+
+  watchId = navigator.geolocation.watchPosition(pos => {
+    const c = pos.coords;
+    if (!best || c.accuracy < best.accuracy) {
+      best = { lat: c.latitude, lng: c.longitude, accuracy: c.accuracy };
+      updateMeter(c.accuracy);
+    }
+    if (best.accuracy <= 15 && Date.now() - started > 5000) finishCapture();
+  }, err => {
+    if (best && err.code !== 1) { finishCapture(); return; }
+    stopWatch();
+    $('captureBtn').disabled = false;
+    ui.capture = 'capture';
+    $('meterBox').classList.add('hidden');
+    setLoc('bad', err.code === 1 ? 'permDenied' : 'unavailable');
+  }, { enableHighAccuracy: true, maximumAge: 0, timeout: WATCH_MS });
+
+  watchTimer = setTimeout(finishCapture, WATCH_MS);
+}
+
+function finishCapture() {
+  if (watchId === null && !best) return;
+  stopWatch();
+  $('captureBtn').disabled = false;
+  ui.capture = 'captureAgain';
+
+  if (!best) { $('meterBox').classList.add('hidden'); setLoc('bad', 'notFound'); return; }
+
+  const a = Math.round(best.accuracy);
+  if (best.accuracy <= GOOD_ACC) {
+    ui.meter = 'recorded';
+    setLoc('good', 'goodMsg', a);
+    acceptLocation();
+  } else if (best.accuracy <= MAX_ACC) {
+    ui.meter = 'lowLabel';
+    setLoc('warn', 'lowMsg', a);
+    $('lowAccBtns').classList.remove('hidden');
+    showMap();
+  } else {
+    ui.meter = 'badLabel';
+    setLoc('bad', 'badMsg', a);
+  }
+}
+
+function showMap() {
+  $('map').classList.remove('hidden');
+  const ll = [best.lat, best.lng];
+  if (!map) {
+    map = L.map('map');
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+  }
+  map.setView(ll, 18);
+  if (marker) { marker.setLatLng(ll); circle.setLatLng(ll).setRadius(best.accuracy); }
+  else {
+    marker = L.circleMarker(ll, { radius: 9, color: '#14305A', weight: 3, fillColor: '#F2B705', fillOpacity: 1 }).addTo(map);
+    circle = L.circle(ll, { radius: best.accuracy, color: '#14305A', weight: 1, fillOpacity: .08 }).addTo(map);
+  }
+  setTimeout(() => map.invalidateSize(), 50);
+}
+
+function acceptLocation() {
+  $('lowAccBtns').classList.add('hidden');
+  showMap();
+  best.plusCode = plusCode(best.lat, best.lng);
+  $('pcode').textContent = best.plusCode;
+  $('confirmBox').classList.remove('hidden');
+  fillAddress();
+}
+
+async function fillAddress() {
+  const box = $('address');
+  if (box.dataset.userEdited === '1') return;
+  ui.addrLooking = true; render();
+  try {
+    const url = 'https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1'
+      + '&accept-language=' + (lang === 'si' ? 'si,en' : 'en')
+      + '&lat=' + best.lat + '&lon=' + best.lng;
+    const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    const j = await r.json();
+    if (j && j.display_name && box.dataset.userEdited !== '1') {
+      box.value = j.display_name.replace(/,\s*(Sri Lanka|ශ්‍රී ලංකාව|இலங்கை)\s*$/, '');
+    }
+  } catch (_) { /* worker types the address */ }
+  ui.addrLooking = false; render();
+}
+$('address').addEventListener('input', () => { $('address').dataset.userEdited = '1'; });
+
+$('captureBtn').onclick = startCapture;
+$('retryBtn').onclick = startCapture;
+$('useAnywayBtn').onclick = () => { setLoc('warn', 'anywayMsg', Math.round(best.accuracy)); acceptLocation(); };
+
+$('submitBtn').onclick = async () => {
+  const ok = [
+    mark('f-address', $('address').value.trim().length >= 5),
+    mark('f-confirm', $('confirm').checked)
+  ].every(Boolean);
+  if (!ok || !best) return;
+
+  if (!SCRIPT_URL || SCRIPT_URL.indexOf('PASTE_') === 0) { ui.submitMsg = 'notConnected'; render(); return; }
+
+  const payload = {
+    fullName: $('fullName').value.trim(),
+    epf: $('epf').value.trim(),
+    module: $('module').value.trim(),
+    lat: +best.lat.toFixed(7),
+    lng: +best.lng.toFixed(7),
+    accuracy: best.accuracy,
+    plusCode: best.plusCode,
+    address: $('address').value.trim(),
+    lang: lang,
+    confirmed: true
+  };
+
+  $('submitBtn').disabled = true;
+  ui.submit = 'submitting'; ui.submitMsg = null; render();
+
+  let j;
+  try {
+    const r = await fetch(SCRIPT_URL, { method: 'POST', body: JSON.stringify(payload) });
+    j = await r.json();
+  } catch (e) {
+    ui.submitMsg = 'netFail'; ui.submit = 'submit'; $('submitBtn').disabled = false; render();
+    return;
+  }
+  if (!j || !j.ok) {
+    ui.submitMsg = 'saveFail'; ui.submit = 'submit'; $('submitBtn').disabled = false; render();
+    return;
+  }
+
+  $('dName').textContent = payload.fullName;
+  $('dEpf').textContent = payload.epf;
+  $('dModule').textContent = payload.module;
+  $('dCode').textContent = payload.plusCode;
+  $('dAddr').textContent = payload.address;
+  ui.doneText = j.updated ? 'doneUpdated' : 'doneText';
+  $('formArea').classList.add('hidden');
+  $('purpose').classList.add('hidden');
+  $('doneCard').classList.remove('hidden');
+  render();
+  window.scrollTo(0, 0);
+};
+
+render();
+</script>
+</body>
+</html>
