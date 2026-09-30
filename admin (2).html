@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pickup points – admin map</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root { --ink:#14305A; --sign:#F2B705; --page:#EEF1F4; --muted:#5A6776; --line:#C9D1DA; --stop:#B3261E; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { font: 15px/1.45 "Atkinson Hyperlegible", "Segoe UI", Roboto, Arial, sans-serif; color: var(--ink); background: var(--page);
+         display: flex; flex-direction: column; padding-top: env(safe-area-inset-top,0px); }
+  header { background: var(--sign); border-bottom: 5px solid var(--ink); padding: 10px 14px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  header h1 { font-size: 1.1rem; margin: 0 12px 0 0; }
+  .stats { display: flex; gap: 14px; flex-wrap: wrap; font-size: .95rem; }
+  .stats b { font-size: 1.05rem; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 10px 14px; background: #fff; border-bottom: 1px solid var(--line); }
+  input[type=text], input[type=password] { font: inherit; padding: 8px 10px; border: 2px solid var(--line); border-radius: 6px; min-width: 200px; }
+  input:focus { outline: none; border-color: var(--ink); }
+  button { font: inherit; font-weight: 700; padding: 8px 14px; border-radius: 6px; border: 2px solid var(--ink); background: var(--ink); color: #fff; cursor: pointer; }
+  button:focus-visible { outline: 3px solid var(--sign); outline-offset: 2px; }
+  label.tog { display: flex; gap: 6px; align-items: center; }
+  #map { flex: 1; min-height: 300px; }
+  #login { max-width: 360px; margin: 60px auto; background: #fff; padding: 20px; border-radius: 10px; border-top: 6px solid var(--sign); }
+  #login h2 { margin-top: 0; }
+  #login input { width: 100%; margin-bottom: 10px; }
+  #loginErr { color: var(--stop); }
+  .hidden { display: none !important; }
+  .pop b { display: block; font-size: 1rem; }
+  .pop .low { color: var(--stop); font-weight: 700; }
+  .pop a { color: var(--ink); font-weight: 700; }
+</style>
+</head>
+<body>
+
+<div id="login">
+  <h2>Pickup points map</h2>
+  <p>Enter the admin key shown when you ran <em>setup()</em> in Apps Script.</p>
+  <input type="password" id="key" placeholder="Admin key" autocomplete="off">
+  <button id="loginBtn">Open map</button>
+  <p id="loginErr"></p>
+</div>
+
+<header id="head" class="hidden">
+  <h1>Registered pickup points</h1>
+  <div class="stats">
+    <span>Showing <b id="sShown">0</b></span>
+    <span>Total <b id="sTotal">0</b></span>
+    <span>Low accuracy <b id="sLow">0</b></span>
+  </div>
+</header>
+<div class="controls hidden" id="controls">
+  <input type="text" id="filter" placeholder="Filter by module, name, EPF or Plus Code">
+  <label class="tog"><input type="checkbox" id="lowOnly"> Low accuracy only</label>
+  <button id="reload">Refresh</button>
+</div>
+<div id="map" class="hidden"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+/* ====== SETTINGS: paste your Apps Script Web app URL here ====== */
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbygsCT593ylQkdZFYmGT0wpxT-89DwBJs1VPcLhqEk9O_rXYQAzebsJC0EUHNF7ic4-BA/exec';
+
+const $ = id => document.getElementById(id);
+let rows = [], map, layer, key = '';
+
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+function colorFor(module) {
+  let h = 0; const s = String(module).toLowerCase().trim();
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+  return 'hsl(' + h + ',70%,42%)';
+}
+
+async function load() {
+  const r = await fetch(SCRIPT_URL + '?action=list&key=' + encodeURIComponent(key));
+  const j = await r.json();
+  if (!j.ok) throw new Error(j.error || 'Could not load data.');
+  rows = j.rows.filter(x => isFinite(x.lat) && isFinite(x.lng));
+  draw(true);
+}
+
+function draw(fit) {
+  const q = $('filter').value.trim().toLowerCase();
+  const lowOnly = $('lowOnly').checked;
+  layer.clearLayers();
+  const pts = [];
+  let low = 0;
+  rows.forEach(x => {
+    const isLow = x.check !== 'Good';
+    if (isLow) low++;
+    if (lowOnly && !isLow) return;
+    if (q && !(String(x.module) + ' ' + x.name + ' ' + x.epf + ' ' + (x.plusCode || '')).toLowerCase().includes(q)) return;
+    const m = L.circleMarker([x.lat, x.lng], {
+      radius: 7, weight: isLow ? 3 : 1.5, color: isLow ? '#B3261E' : '#14305A',
+      fillColor: colorFor(x.module), fillOpacity: .9
+    });
+    m.bindPopup('<div class="pop"><b>' + esc(x.name) + '</b>EPF ' + esc(x.epf) + '<br>' + esc(x.module) +
+      '<br>' + esc(x.address) + '<br>Plus Code: <b style="display:inline">' + esc(x.plusCode) + '</b><br><span class="' + (isLow ? 'low' : '') + '">Accuracy ' + esc(x.accuracy) + ' m (' + esc(x.check) + ')</span>' +
+      '<br>Updated ' + esc(x.updated) + (x.inMaster && x.inMaster !== 'Yes' ? '<br><span class="low">Master list: ' + esc(x.inMaster) + '</span>' : '') +
+      '<br><a target="_blank" rel="noopener" href="https://www.google.com/maps?q=' + x.lat + ',' + x.lng + '">Open in Google Maps</a></div>');
+    m.addTo(layer);
+    pts.push([x.lat, x.lng]);
+  });
+  $('sShown').textContent = pts.length;
+  $('sTotal').textContent = rows.length;
+  $('sLow').textContent = low;
+  if (fit && pts.length) map.fitBounds(pts, { padding: [30, 30], maxZoom: 16 });
+}
+
+async function openMap() {
+  key = $('key').value.trim();
+  $('loginErr').textContent = '';
+  if (SCRIPT_URL.indexOf('PASTE_') === 0) { $('loginErr').textContent = 'Paste the Web app URL into admin.html first.'; return; }
+  try {
+    if (!map) {
+      ['head', 'controls', 'map'].forEach(id => $(id).classList.remove('hidden'));
+      map = L.map('map', { preferCanvas: true }).setView([7.87, 80.77], 8);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+      layer = L.layerGroup().addTo(map);
+    }
+    await load();
+    $('login').classList.add('hidden');
+    try { sessionStorage.setItem('tp_admin_key', key); } catch (_) {}
+  } catch (e) {
+    ['head', 'controls', 'map'].forEach(id => $(id).classList.add('hidden'));
+    $('login').classList.remove('hidden');
+    $('loginErr').textContent = e.message === 'Failed to fetch' ? 'Could not reach the sheet. Check the URL and your connection.' : e.message;
+  }
+}
+
+$('loginBtn').onclick = openMap;
+$('key').addEventListener('keydown', e => { if (e.key === 'Enter') openMap(); });
+$('filter').addEventListener('input', () => draw(false));
+$('lowOnly').addEventListener('change', () => draw(false));
+$('reload').onclick = () => load().catch(e => alert(e.message));
+try { const k = sessionStorage.getItem('tp_admin_key'); if (k) { $('key').value = k; openMap(); } } catch (_) {}
+</script>
+</body>
+</html>
